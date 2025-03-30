@@ -2,7 +2,8 @@ import csv
 import random
 import networkx as nx
 import matplotlib.pyplot as plt
-
+seed= 42
+seeded = random.Random(seed)
 
 def read_csv_and_build_rankings(csv_path):
     rankings = []
@@ -99,13 +100,13 @@ def build_ranking_pairs(rankings):
 
 def violation_count(ordering, M, memo):
     """
-    sum of violations
+    Recursively computes the violation cost for an ordering (tuple of candidate IDs)
     given the precomputed matrix M, where:
-      M[i][j] == 1 if tree forces j above i,
-      else 0
+      M[i][j] == 1 if the tree forces candidate j to be above candidate i.
+    Uses memoization to speed up repeated suborderings.
     
-    (x, y, z, ...)->
-      sum(M[x][y] for y in (y,z,...))  +  violation_count((y,z,...), M, memo)
+    If ordering = (x, y, z, ...), then:
+       cost = sum(M[x][y] for y in (y, z, ...)) + violation_count((y, z, ...))
     """
     if len(ordering) <= 1:
         return 0
@@ -114,6 +115,18 @@ def violation_count(ordering, M, memo):
     first = ordering[0]
     cost_first = sum(M[first][x] for x in ordering[1:])
     cost_rest = violation_count(ordering[1:], M, memo)
+    total = cost_first + cost_rest
+    memo[ordering] = total
+    return total
+
+def missed_order_count(ordering, S, memo):
+    if len(ordering) <= 1:
+        return 0
+    if ordering in memo:
+        return memo[ordering]
+    first = ordering[0]
+    cost_first = sum(S[first][x] for x in ordering[1:])
+    cost_rest = missed_order_count(ordering[1:], S, memo)
     total = cost_first + cost_rest
     memo[ordering] = total
     return total
@@ -131,25 +144,27 @@ def cost_of_tree(parent, rankings, position):
         for j in range(n):
             if i != j and (j, i) in forced_pairs:
                 M[i][j] = 1
-    memo = {}  
+    S = [[0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(n):
+            if i != j and ((i, j) not in forced_pairs and (j, i) not in forced_pairs):
+                S[i][j] = 1
+    memo_violation = {}
     total_violations = 0
     for r in range(R):
         ordering = tuple(rankings[r])
-        total_violations += violation_count(ordering, M, memo)
-    ranking_pairs_list = build_ranking_pairs(rankings)
+        total_violations += violation_count(ordering, M, memo_violation)
+    memo_missed = {}
     total_missed = 0
     for r in range(R):
-        for (i, j) in ranking_pairs_list[r]:
-            if (i, j) not in forced_pairs and (j, i) not in forced_pairs:
-                total_missed += 1
-    
+        ordering = tuple(rankings[r])
+        total_missed += missed_order_count(ordering, S, memo_missed)
     denom = R * (k * (k - 1) / 2.0)
     cost = (total_violations + gamma*total_missed) / denom
     return cost
 
-
 def random_tree(n, root=0):
-    prufer = [random.randrange(n) for _ in range(n - 2)]
+    prufer = [seeded.randrange(n) for _ in range(n - 2)]
     degree = [1] * n
     for x in prufer:
         degree[x] += 1
