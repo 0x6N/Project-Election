@@ -304,7 +304,7 @@ def regression_test():
 class TreeGUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Ranking Tree Optimiser (fast)")
+        self.title("Ranking Tree Synthesiser")
         self.geometry("520x500")
         self.gamma_var   = tk.StringVar(value="0.3")
         self.trials_var  = tk.StringVar(value="20")
@@ -387,7 +387,7 @@ class TreeGUI(tk.Tk):
             parent = local_search(parent, rankings, position,
                                   update_iter_callback=lambda m:self.log_line(f"  {m}"),
                                   max_iter=100)
-            c = COST_OF_TREE_FUNCTION(parent, None, None)
+            c = COST_OF_TREE_FUNCTION(parent, rankings, position)
             self.log_line(f"  Trial {t+1} cost: {c:.6f}")
             if c < best_cost:
                 best_tree, best_cost = parent[:], c
