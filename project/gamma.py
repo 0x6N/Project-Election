@@ -1,5 +1,5 @@
 import csv, random, threading, math, copy, sys, tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, filedialog
 import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
@@ -306,6 +306,7 @@ class TreeGUI(tk.Tk):
         super().__init__()
         self.title("Ranking Tree Synthesiser")
         self.geometry("520x500")
+        self.csv_path_var = tk.StringVar()
         self.gamma_var   = tk.StringVar(value="0.3")
         self.trials_var  = tk.StringVar(value="20")
         self.seed_var    = tk.StringVar(value="42")
@@ -313,6 +314,14 @@ class TreeGUI(tk.Tk):
         self.create_widgets()
 
     def create_widgets(self):
+        row = ttk.Frame(self); row.pack(pady=4, padx=8, fill=tk.X)
+        ttk.Label(row, text="CSV file").pack(side=tk.LEFT)
+        e = ttk.Entry(row, textvariable=self.csv_path_var, width=32,
+                      state="readonly")
+        e.pack(side=tk.LEFT, padx=6, expand=True, fill=tk.X)
+        ttk.Button(row, text="Browse...",
+                   command=self.browse_csv).pack(side=tk.LEFT)
+        
         row = ttk.Frame(self); row.pack(pady=4, padx=8, fill=tk.X)
         ttk.Label(row,text="Gamma").pack(side=tk.LEFT)
         ttk.Entry(row,textvariable=self.gamma_var,width=8).pack(side=tk.LEFT,padx=6)
@@ -341,6 +350,12 @@ class TreeGUI(tk.Tk):
         self.cand_var = tk.StringVar(value="11")
         ttk.Entry(row, textvariable=self.cand_var, width=8).pack(side=tk.LEFT, padx=6)
     
+    def browse_csv(self):
+        fname = filedialog.askopenfilename(
+            title="Select rankings CSV",
+           filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+        if fname:
+            self.csv_path_var.set(fname)
 
     def log_line(self,msg):
         self.log['state']='normal'
@@ -373,7 +388,11 @@ class TreeGUI(tk.Tk):
         self.log['state']='normal'; self.log.delete('1.0',tk.END); self.log['state']='disabled'
 
         # build matrices once
-        csv_path = r"ssp\borda4.csv"
+        csv_path = self.csv_path_var.get()
+        if not csv_path:
+            messagebox.showerror("Missing file",
+                                 "Please choose a CSV file first.")
+            return
         rankings,k = read_csv_and_build_rankings(csv_path)
         position   = build_position_lookup(rankings)
         global PREF_GLOBAL, PREF_BY_ROOT, ROOT_COUNTS, TOTAL_PAIRS_GLOBAL
