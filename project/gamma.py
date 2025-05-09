@@ -2,10 +2,14 @@ import csv
 import random
 import networkx as nx
 import matplotlib.pyplot as plt
-from ete3 import Tree, TreeStyle
-seed= 42
+from ete3 import Tree, TreeStyle 
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+
+seed = 42
 seeded = random.Random(seed)
 GAMMA = 0.3
+
 
 def read_csv_and_build_rankings(csv_path):
     rankings = []
@@ -38,12 +42,10 @@ def read_csv_and_build_rankings(csv_path):
                 rankings.append(ranking)
     return rankings, k
 
-
 def build_position_lookup(rankings):
     """
     For each ranking r:
-       position[r][candidate] = index
-    Only the k ranked candidates are present.
+      position[r][candidate] = index (0 = best, etc.)
     """
     R = len(rankings)
     position = [dict() for _ in range(R)]
@@ -53,9 +55,6 @@ def build_position_lookup(rankings):
     return position
 
 def get_subtree_nodes(parent, cut_child):
-    """
-    nodes in subtree rooted at 'cut_child'.
-    """
     stack = [cut_child]
     subtree = set([cut_child])
     n = len(parent)
@@ -98,7 +97,6 @@ def build_ranking_pairs(rankings):
                 pair_set.add((r[i], r[j]))
         ranking_pairs.append(pair_set)
     return ranking_pairs
-
 
 def violation_count(ordering, M, memo):
     if len(ordering) <= 1:
@@ -152,8 +150,44 @@ def violation_plus_missed_cost_of_tree(parent, rankings, position):
         ordering = tuple(rankings[r])
         total_missed += missed_order_count(ordering, S, memo_missed)
     denom = R * (k * (k - 1) / 2.0)
-    cost = (total_violations + GAMMA*total_missed) / denom
+    cost = (total_violations + GAMMA * total_missed) / denom
     return cost
+
+def cost_of_tree_re_rooted(parent, rankings, position):
+    R = len(rankings)
+    if R == 0:
+        return 0.0
+    n = len(parent)
+    rerooted_trees = {}
+    forced_pairs_by_root = {}
+    for candidate in range(n):
+        rt = re_root_tree(parent, candidate)
+        rerooted_trees[candidate] = rt
+        forced_pairs_by_root[candidate] = build_forced_pairs(rt)
+    ranking_pairs_list = []
+    for r in rankings:
+        pair_set = set()
+        for i in range(len(r)):
+            for j in range(i + 1, len(r)):
+                pair_set.add((r[i], r[j]))
+        ranking_pairs_list.append(pair_set)
+    total_cost = 0.0
+    for r in range(R):
+        new_root = rankings[r][0]
+        forced_pairs = forced_pairs_by_root[new_root]
+        violation_r = 0
+        missed_r = 0
+        for (i, j) in forced_pairs:
+            if i in position[r] and j in position[r]:
+                if position[r][j] < position[r][i]:
+                    violation_r += 1
+        for (i, j) in ranking_pairs_list[r]:
+            if (i, j) not in forced_pairs and (j, i) not in forced_pairs:
+                missed_r += 1
+        k = len(rankings[r])
+        denom = k * (k - 1) / 2.0
+        total_cost += (violation_r + GAMMA * missed_r) / denom
+    return total_cost / R
 
 def connex_subtree_plus_missed_cost_of_tree(parent, rankings, position):
     R = len(rankings)
@@ -200,7 +234,18 @@ def connex_subtree_plus_missed_cost_of_tree(parent, rankings, position):
         ordering = tuple(rankings[r])
         total_missed += missed_order_count(ordering, S, memo_missed)
     denom = R * (k * (k - 1) / 2.0)
-    return normalized_cost+( GAMMA*total_missed/ denom)
+    return normalized_cost + (GAMMA * total_missed / denom)
+
+def re_root_tree(parent, new_root):
+    new_parent = parent.copy()
+    cur = new_root
+    prev = None
+    while cur is not None:
+        next_node = new_parent[cur]
+        new_parent[cur] = prev
+        prev = cur
+        cur = next_node
+    return new_parent
 
 def random_tree(n, root=0):
     prufer = [seeded.randrange(n) for _ in range(n - 2)]
@@ -210,7 +255,7 @@ def random_tree(n, root=0):
     edges = []
     leaf_set = set(i for i in range(n) if degree[i] == 1)
     for x in prufer:
-        leaf = min(leaf_set)  # tie-break
+        leaf = min(leaf_set)
         edges.append((leaf, x))
         degree[leaf] -= 1
         if degree[leaf] == 0:
@@ -238,58 +283,7 @@ def random_tree(n, root=0):
                 queue.append(v)
     return parent
 
-def re_root_tree(parent, new_root):
-    new_parent = parent.copy()
-    cur = new_root
-    prev = None
-    while cur is not None:
-        next_node = new_parent[cur]
-        new_parent[cur] = prev
-        prev = cur
-        cur = next_node
-    return new_parent
-
-def cost_of_tree_re_rooted(parent, rankings, position):
-    R = len(rankings)
-    if R == 0:
-        return 0.0
-    n = len(parent)
-    rerooted_trees = {}
-    forced_pairs_by_root = {}
-    for candidate in range(n):
-        rt = re_root_tree(parent, candidate)
-        rerooted_trees[candidate] = rt
-        forced_pairs_by_root[candidate] = build_forced_pairs(rt)
-    ranking_pairs_list = []
-    for r in rankings:
-        pair_set = set()
-        for i in range(len(r)):
-            for j in range(i + 1, len(r)):
-                pair_set.add((r[i], r[j]))
-        ranking_pairs_list.append(pair_set)
-    total_cost = 0.0
-    for r in range(R):
-        new_root = rankings[r][0]
-        forced_pairs = forced_pairs_by_root[new_root]
-        violation_r = 0
-        missed_r = 0
-        for (i, j) in forced_pairs:
-            if i in position[r] and j in position[r]:
-                if position[r][j] < position[r][i]:
-                    violation_r += 1
-        for (i, j) in ranking_pairs_list[r]:
-            if (i, j) not in forced_pairs and (j, i) not in forced_pairs:
-                missed_r += 1
-        
-        k = len(rankings[r])
-        denom = k * (k - 1) / 2.0
-        total_cost += (violation_r + GAMMA*missed_r) / denom
-    
-    return total_cost / R
-
-
-
-COST_OF_TREE_FUNCTION = cost_of_tree_re_rooted #TODO: maybe refactor this
+COST_OF_TREE_FUNCTION = cost_of_tree_re_rooted
 
 def local_search(parent, rankings, position, max_iter=100):
     n = len(parent)
@@ -306,12 +300,12 @@ def local_search(parent, rankings, position, max_iter=100):
         for c in range(n):
             p = parent[c]
             if p is None:
-                continue 
+                continue
             subtree = get_subtree_nodes(parent, c)
             parent[c] = None
             for x in range(n):
                 if x in subtree:
-                    continue  # avoid cycle
+                    continue
                 if x == p:
                     continue 
                 parent[c] = x
@@ -369,28 +363,111 @@ def draw_tree(parent):
     plt.show()
 
 
-def main():
-    csv_path = r"ssp\borda4.csv"
+def run_algorithm_main(cost_func, num_trials, gamma_value, candidate_count, update_callback):
+    global GAMMA, COST_OF_TREE_FUNCTION
+    GAMMA = gamma_value
+    COST_OF_TREE_FUNCTION = cost_func
+    csv_path = r"ssp\borda4.csv" 
     rankings, k = read_csv_and_build_rankings(csv_path)
     print(f"Loaded {len(rankings)} voters' rankings from {csv_path}.")
-    print(f"Each ranking : {k} preferred candidates.")
+    print(f"Each ranking has {k} preferred candidates.")
     position = build_position_lookup(rankings)
-    n = 11 
-    num_trials = 2
+    n = candidate_count
+    
     best_tree = None
     best_cost = float('inf')
+    
     for trial in range(num_trials):
         parent_candidate = random_tree(n, root=0)
         optimized_tree = local_search(parent_candidate, rankings, position, max_iter=100)
         cost_candidate = COST_OF_TREE_FUNCTION(optimized_tree, rankings, position)
-        print(f"Trial {trial+1}/{num_trials} cost: {cost_candidate:.6f}")
+        msg = f"Trial {trial+1}/{num_trials} cost: {cost_candidate:.6f}"
+        print(msg)
+        update_callback(msg)
         if cost_candidate < best_cost:
             best_cost = cost_candidate
             best_tree = optimized_tree[:]
+    final_msg = f"Best tree cost = {best_cost:.6f}"
     print("\nBest tree found:")
     print_tree(best_tree)
-    print(f"Final cost = {best_cost:.6f}")
+    print(final_msg)
+    update_callback(final_msg)
     draw_tree(best_tree)
 
+
+class TreeGUI(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Ranking Tree Optimizer")
+        self.geometry("450x350")
+        self.cost_functions = {
+            "Violations+Missed": violation_plus_missed_cost_of_tree,
+            "Violations+Missed Re-rooted": cost_of_tree_re_rooted,
+            "Connex Subtree+Missed": connex_subtree_plus_missed_cost_of_tree
+        }
+        self.selected_cost_function = tk.StringVar(value="Re-rooted")
+        
+
+        self.gamma_var = tk.StringVar(value="0.3")
+        self.trials_var = tk.StringVar(value="20")
+        self.candidate_var = tk.StringVar(value="11")
+        self.create_widgets()
+    
+    def create_widgets(self):
+        cost_frame = ttk.Frame(self)
+        cost_frame.pack(pady=5, padx=10, fill=tk.X)
+        ttk.Label(cost_frame, text="Cost Function:").pack(side=tk.LEFT)
+        cost_options = list(self.cost_functions.keys())
+        cost_menu = ttk.OptionMenu(cost_frame, self.selected_cost_function, 
+                                   self.selected_cost_function.get(), *cost_options)
+        cost_menu.pack(side=tk.LEFT, padx=5)
+
+        gamma_frame = ttk.Frame(self)
+        gamma_frame.pack(pady=5, padx=10, fill=tk.X)
+        ttk.Label(gamma_frame, text="Gamma:").pack(side=tk.LEFT)
+        gamma_entry = ttk.Entry(gamma_frame, textvariable=self.gamma_var, width=10)
+        gamma_entry.pack(side=tk.LEFT, padx=5)
+        
+        trials_frame = ttk.Frame(self)
+        trials_frame.pack(pady=5, padx=10, fill=tk.X)
+        ttk.Label(trials_frame, text="Number of Trials:").pack(side=tk.LEFT)
+        trials_entry = ttk.Entry(trials_frame, textvariable=self.trials_var, width=10)
+        trials_entry.pack(side=tk.LEFT, padx=5)
+        candidate_frame = ttk.Frame(self)
+        candidate_frame.pack(pady=5, padx=10, fill=tk.X)
+        ttk.Label(candidate_frame, text="Total Candidates:").pack(side=tk.LEFT)
+        candidate_entry = ttk.Entry(candidate_frame, textvariable=self.candidate_var, width=10)
+        candidate_entry.pack(side=tk.LEFT, padx=5)
+
+        self.log_text = scrolledtext.ScrolledText(self, height=10, state='disabled')
+        self.log_text.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
+
+        run_button = ttk.Button(self, text="Run", command=self.run_algorithm)
+        run_button.pack(pady=20)
+        run_button.pack(pady=5)
+    
+    def update_log(self, message):
+        self.log_text.config(state='normal')
+        self.log_text.insert(tk.END, message + "\n")
+        self.log_text.see(tk.END)
+        self.log_text.config(state='disabled')
+    
+    def run_algorithm(self):
+        try:
+            gamma_value = float(self.gamma_var.get())
+            num_trials = int(self.trials_var.get())
+            candidate_count = int(self.candidate_var.get())
+        except ValueError:
+            messagebox.showerror("Input Error", "Gamma must be a float, trials and total candidates must be integers.")
+            return
+        cost_func_name = self.selected_cost_function.get()
+        cost_func = self.cost_functions.get(cost_func_name, cost_of_tree_re_rooted)
+        self.log_text.config(state='normal')
+        self.log_text.delete('1.0', tk.END)
+        self.log_text.config(state='disabled')
+        
+        run_algorithm_main(cost_func, num_trials, gamma_value, candidate_count, self.update_log)
+
 if __name__ == "__main__":
-    main()
+    app = TreeGUI()
+    app.mainloop()
