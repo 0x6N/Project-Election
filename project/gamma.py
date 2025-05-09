@@ -2,8 +2,10 @@ import csv
 import random
 import networkx as nx
 import matplotlib.pyplot as plt
+from ete3 import Tree, TreeStyle
 seed= 42
 seeded = random.Random(seed)
+GAMMA = 0.3
 
 def read_csv_and_build_rankings(csv_path):
     rankings = []
@@ -99,15 +101,6 @@ def build_ranking_pairs(rankings):
 
 
 def violation_count(ordering, M, memo):
-    """
-    Recursively computes the violation cost for an ordering (tuple of candidate IDs)
-    given the precomputed matrix M, where:
-      M[i][j] == 1 if the tree forces candidate j to be above candidate i.
-    Uses memoization to speed up repeated suborderings.
-    
-    If ordering = (x, y, z, ...), then:
-       cost = sum(M[x][y] for y in (y, z, ...)) + violation_count((y, z, ...))
-    """
     if len(ordering) <= 1:
         return 0
     if ordering in memo:
@@ -131,8 +124,7 @@ def missed_order_count(ordering, S, memo):
     memo[ordering] = total
     return total
 
-def cost_of_tree(parent, rankings, position):
-    gamma=0.3
+def violation_plus_missed_cost_of_tree(parent, rankings, position):
     n = len(parent)        
     R = len(rankings)
     if R == 0:
@@ -160,8 +152,55 @@ def cost_of_tree(parent, rankings, position):
         ordering = tuple(rankings[r])
         total_missed += missed_order_count(ordering, S, memo_missed)
     denom = R * (k * (k - 1) / 2.0)
-    cost = (total_violations + gamma*total_missed) / denom
+    cost = (total_violations + GAMMA*total_missed) / denom
     return cost
+
+def connex_subtree_plus_missed_cost_of_tree(parent, rankings, position):
+    R = len(rankings)
+    if R == 0:
+        return 0.0
+    k = len(rankings[0])
+    total_remaining = 0  
+    for ranking in rankings:
+        integrated = set()  
+        L = 0
+        for candidate in ranking:
+            if L == 0:
+                integrated.add(candidate)
+                L = 1
+            else:
+                connected = False
+                p = parent[candidate]
+                if p is not None and p in integrated:
+                    connected = True
+                else:
+                    for x in integrated:
+                        if parent[x] == candidate:
+                            connected = True
+                            break
+                if connected:
+                    integrated.add(candidate)
+                    L += 1
+                else:
+                    break
+        remaining = k - L
+        total_remaining += remaining
+    normalized_cost = total_remaining / (R * k)
+    
+    forced_pairs = build_forced_pairs(parent)
+    n = len(parent)
+    S = [[0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(n):
+            if i != j and ((i, j) not in forced_pairs and (j, i) not in forced_pairs):
+                S[i][j] = 1
+    memo_missed = {}
+    total_missed = 0
+    for r in range(R):
+        ordering = tuple(rankings[r])
+        total_missed += missed_order_count(ordering, S, memo_missed)
+    denom = R * (k * (k - 1) / 2.0)
+    return normalized_cost+( GAMMA*total_missed/ denom)
 
 def random_tree(n, root=0):
     prufer = [seeded.randrange(n) for _ in range(n - 2)]
@@ -199,9 +238,62 @@ def random_tree(n, root=0):
                 queue.append(v)
     return parent
 
+def re_root_tree(parent, new_root):
+    new_parent = parent.copy()
+    cur = new_root
+    prev = None
+    while cur is not None:
+        next_node = new_parent[cur]
+        new_parent[cur] = prev
+        prev = cur
+        cur = next_node
+    return new_parent
+
+def cost_of_tree_re_rooted(parent, rankings, position):
+    R = len(rankings)
+    if R == 0:
+        return 0.0
+    n = len(parent)
+    rerooted_trees = {}
+    forced_pairs_by_root = {}
+    for candidate in range(n):
+        rt = re_root_tree(parent, candidate)
+        rerooted_trees[candidate] = rt
+        forced_pairs_by_root[candidate] = build_forced_pairs(rt)
+    ranking_pairs_list = []
+    for r in rankings:
+        pair_set = set()
+        for i in range(len(r)):
+            for j in range(i + 1, len(r)):
+                pair_set.add((r[i], r[j]))
+        ranking_pairs_list.append(pair_set)
+    total_cost = 0.0
+    for r in range(R):
+        new_root = rankings[r][0]
+        forced_pairs = forced_pairs_by_root[new_root]
+        violation_r = 0
+        missed_r = 0
+        for (i, j) in forced_pairs:
+            if i in position[r] and j in position[r]:
+                if position[r][j] < position[r][i]:
+                    violation_r += 1
+        for (i, j) in ranking_pairs_list[r]:
+            if (i, j) not in forced_pairs and (j, i) not in forced_pairs:
+                missed_r += 1
+        
+        k = len(rankings[r])
+        denom = k * (k - 1) / 2.0
+        total_cost += (violation_r + GAMMA*missed_r) / denom
+    
+    return total_cost / R
+
+
+
+COST_OF_TREE_FUNCTION = cost_of_tree_re_rooted #TODO: maybe refactor this
+
 def local_search(parent, rankings, position, max_iter=100):
     n = len(parent)
-    current_cost = cost_of_tree(parent, rankings, position)
+    current_cost = COST_OF_TREE_FUNCTION(parent, rankings, position)
     iters = 0
     while iters < max_iter:
         best_move = None
@@ -223,7 +315,7 @@ def local_search(parent, rankings, position, max_iter=100):
                 if x == p:
                     continue 
                 parent[c] = x
-                new_cost = cost_of_tree(parent, rankings, position)
+                new_cost = COST_OF_TREE_FUNCTION(parent, rankings, position)
                 if new_cost < best_cost:
                     best_cost = new_cost
                     best_move = (p, c, x)
@@ -290,7 +382,7 @@ def main():
     for trial in range(num_trials):
         parent_candidate = random_tree(n, root=0)
         optimized_tree = local_search(parent_candidate, rankings, position, max_iter=100)
-        cost_candidate = cost_of_tree(optimized_tree, rankings, position)
+        cost_candidate = COST_OF_TREE_FUNCTION(optimized_tree, rankings, position)
         print(f"Trial {trial+1}/{num_trials} cost: {cost_candidate:.6f}")
         if cost_candidate < best_cost:
             best_cost = cost_candidate
